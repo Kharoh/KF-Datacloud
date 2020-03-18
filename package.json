@@ -22,5 +22,8 @@
   "bugs": {
     "url": "https://github.com/Kharoh/KF-Datacloud/issues"
   },
-  "homepage": "https://github.com/Kharoh/KF-Datacloud#readme"
+  "homepage": "https://github.com/Kharoh/KF-Datacloud#readme",
+  "dependencies": {
+    "google-spreadsheets": "^2.0.0"
+  }
 }

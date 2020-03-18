@@ -1,0 +1,26 @@
+{
+  "name": "kf-datacloud",
+  "version": "1.0.0",
+  "description": "A database based on google spreadsheets npm extension, working like KF-Database but persistent datas are stored on google drive. ",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kharoh/KF-Datacloud.git"
+  },
+  "keywords": [
+    "database",
+    "cloud",
+    "google",
+    "drive",
+    "kf-database"
+  ],
+  "author": "Kharoh",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Kharoh/KF-Datacloud/issues"
+  },
+  "homepage": "https://github.com/Kharoh/KF-Datacloud#readme"
+}

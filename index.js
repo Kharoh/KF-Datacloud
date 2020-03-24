@@ -1,145 +1,55 @@
-// Native imports
 const fs = require('fs')
-const { resolve, sep } = require('path')
+const readline = require('readline')
+const { google } = require('googleapis')
+const GoogleSpreadsheets = require('google-spreadsheets')
 
-// Modules imports
-const {
-  get: _get,
-  set: _set,
-  isNil,
-  isArray,
-  toPath
-} = require('lodash')
+const {client_secret, client_id, redirect_uris} = JSON.parse(fs.readFileSync('./credentials.json')).installed
 
-// Use Symbols to create private methods
-const _init = Symbol('init')
+const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0])
 
-class Base extends Map {
-  constructor (options) {
-    super()
+const SCOPES = ['https://www.googleapis.com/auth/drive']
 
-    if (!options) throw new Error('Expected one option argument in the constructor call')
-    if (!options.name) throw new Error('You should give a name to your Database')
-    this.name = options.name
+const TOKEN_PATH = 'token.json'
 
-    if (!fs.existsSync('./data')) {
-      fs.mkdirSync('./data')
-    }
+fs.readFile(TOKEN_PATH, (err, token) => {
+  if (err) return getAccessToken(oAuth2Client, createDataCloud)
+  oAuth2Client.setCredentials(JSON.parse(token))
+  createDataCloud(oAuth2Client)
+})
 
-    const dataDir = resolve(process.cwd(), options.dataDir || 'data')
-    const database = new Database(`${dataDir}${sep}base.sqlite`)
-
-    this[_init](database)
-  }
-
-  [_init] (database) {
-    this.db = database
-
-    const table = this.db.prepare("SELECT count(*) FROM sqlite_master WHERE type='table' AND name = ?;").get(this.name)
-    if (!table['count(*)']) {
-      this.db.prepare(`CREATE TABLE ${this.name} (key text PRIMARY KEY, value text)`).run()
-      this.db.pragma('synchronous = 1')
-      this.db.pragma('journal_mode = wal')
-    }
-    this.db.prepare(`CREATE TABLE IF NOT EXISTS 'internal::changes::${this.name}' (type TEXT, key TEXT, value TEXT, timestamp INTEGER, pid INTEGER);`).run()
-    this.db.prepare('CREATE TABLE IF NOT EXISTS \'internal::autonum\' (enmap TEXT PRIMARY KEY, lastnum INTEGER)').run()
-
-    this.fetchEverything()
-  }
-
-  fetchEverything () {
-    const rows = this.db.prepare(`SELECT * FROM ${this.name};`).all()
-    for (const row of rows) {
-      const val = JSON.parse(row.value)
-      super.set(row.key, val)
-    }
-    return this
-  }
-
-  get (key, path = null) {
-    if (isNil(key)) return null
-
-    key = key.toString()
-
-    if (!isNil(path)) {
-      const data = super.get(key)
-      return _get(data, path)
-    }
-
-    const data = super.get(key)
-    return data
-  }
-
-  set (key, val, path = null) {
-    if (isNil(key) || !['String', 'Number'].includes(key.constructor.name)) {
-      throw new Error('The Database requires keys to be strings or numbers')
-    }
-
-    key = key.toString()
-    let data = super.get(key)
-
-    if (!isNil(path)) {
-      if (isNil(data)) data = {}
-      _set(data, path, val)
-    } else {
-      data = val
-    }
-
-    this.db.prepare(`INSERT OR REPLACE INTO ${this.name} (key, value) VALUES (?, ?);`).run(key, JSON.stringify(data))
-
-    return super.set(key, data)
-  }
-
-  ensure (key, defaultValue, path = null) {
-    if (isNil(defaultValue)) throw new Error(`No default value provided on ensure method for "${key}" in "${this.name}"`)
-
-    if (!isNil(path)) {
-      this.ensure(key, {})
-      if (this.get(key, path)) return this.get(key, path)
-      this.set(key, defaultValue, path)
-      return defaultValue
-    }
-
-    if (this.get(key)) return this.get(key)
-
-    this.set(key, defaultValue)
-    return defaultValue
-  }
-
-  delete (key, path = null) {
-    if (!isNil(path)) {
-      let data = this.get(key)
-      path = toPath(path)
-      const last = path.pop()
-      const propValue = path.length ? _get(data, path) : data
-      if (isArray(propValue)) {
-        propValue.splice(last, 1)
-      } else {
-        delete propValue[last]
-      }
-      if (path.length) {
-        _set(data, path, propValue)
-      } else {
-        data = propValue
-      }
-      this.set(key, data)
-    } else {
-      super.delete(key)
-      this.db.prepare(`DELETE FROM ${this.name} WHERE key = '${key}'`).run()
-      return this
-    }
-    return this
-  }
-
-  deleteAll () {
-    this.db.prepare(`DELETE FROM ${this.name};`).run()
-    super.clear()
-  }
-
-  get indexes () {
-    const rows = this.db.prepare(`SELECT key FROM '${this.name}';`).all()
-    return rows.map(row => row.key)
-  }
+function getAccessToken(oAuth2Client, callback) {
+  const authUrl = oAuth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: SCOPES,
+  });
+  console.log('Authorize this app by visiting this url:', authUrl);
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  rl.question('Enter the code from that page here: ', (code) => {
+    rl.close();
+    oAuth2Client.getToken(code, (err, token) => {
+      if (err) return console.error('Error retrieving access token', err);
+      oAuth2Client.setCredentials(token);
+      // Store the token to disk for later program executions
+      fs.writeFile(TOKEN_PATH, JSON.stringify(token), (err) => {
+        if (err) return console.error(err);
+        console.log('Token stored to', TOKEN_PATH);
+      });
+      callback(oAuth2Client);
+    });
+  });
 }
 
-module.exports = Base
+function createDataCloud(oAuth2Client) {
+  GoogleSpreadsheets({
+    key: '1GH7uakSPODRQobykuPhnET_YzEZqguHRrFyt4tHyp4s',
+    auth: oAuth2Client
+  }, function(err, spreadsheet) {
+    console.log(spreadsheet)
+  })
+}
+
+//
+

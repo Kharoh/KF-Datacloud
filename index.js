@@ -111,6 +111,16 @@ class Cloud extends Map {
     })
   }
 
+  /* get pseudo code : 
+    set (path) {
+      super.set(...)
+
+      this[_cloudReady].then(spreadsheet => {
+        spreadsheet.addRow(...)
+      })  
+    }
+  */
+
 }
 
 module.exports = Cloud

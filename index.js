@@ -1,7 +1,6 @@
 const fs = require('fs')
 const readline = require('readline')
 const { google } = require('googleapis')
-const GoogleSpreadsheets = require('google-spreadsheets')
 
 /* We use symbols to create private methods */
 const _init = Symbol('init')
@@ -11,9 +10,11 @@ const _token = Symbol('token')
 const _oAuth2Client = Symbol('oAuth2Client')
 const _getAccessToken = Symbol('getAccessToken')
 const _saveNewToken = Symbol('saveNewToken')
-const _cloudReady = Symbol('isReady')
 const _setCloudReady = Symbol('setReady')
 const _loadDataCloud = Symbol('openDataCloud')
+
+// we need to extract the private methods as functions and call them inside Cloud using init.call(this, arg) for example, to disable the log they provide
+// OR DELETE THE PROPERTIES AFTER INIT
 
 /**
  * @param {string} options.name - The name of the Cloud Database
@@ -38,22 +39,20 @@ class Cloud extends Map {
     }
 
     this[_key] = options.key
-    this[_credentials] = credentials
-    this[_token] = token
 
     /* this promise will be resolved after the loading of the Datacloud, instatiated at the end of init, its fulfill value is the spreadsheet / Datacloud */
-    this[_cloudReady] = new Promise((resolve, reject) => {
+    this.isReady = new Promise((resolve, reject) => {
       this[_setCloudReady] = resolve
     })
 
-    this[_init]()
+    this[_init](credentials, token)
   }
 
-  async [_init] () {
+  async [_init] (credentials, token) {
     const { client_secret, client_id, redirect_uris } = JSON.parse(credentials).installed
     this[_oAuth2Client] = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0])
 
-    if (this[_token]) this[_oAuth2Client].setCredentials(JSON.parse(this[_token]))
+    if (token) this[_oAuth2Client].setCredentials(JSON.parse(token))
     else {
       let newToken
 
@@ -99,16 +98,33 @@ class Cloud extends Map {
     })
   }
 
-  [_loadDataCloud] () {
-    GoogleSpreadsheets({
-      key: this[_key],
+  async [_loadDataCloud] () {
+    const sheets = await google.sheets({
+      version: 'v4',
       auth: this[_oAuth2Client]
-    }, 
-    
-    (err, spreadsheet) => {
-      if (err) throw new Error('Encountered a problem while loading the spreadsheet', err)
-      this[_setCloudReady](spreadsheet)
     })
+
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: this[_key],
+      includeGridData: true,
+    })
+
+    this.fetchEverything(spreadsheet)
+    this[_setCloudReady](spreadsheet)
+  }
+
+  fetchEverything(spreadsheet) {
+    const datasheet = spreadsheet.data.sheets[0] // we could ask the user as a parameter what sheet he wants
+
+    for (let i = 0; i < datasheet.properties.gridProperties.rowCount; i++) {
+      const rowDataValues = datasheet.data[0].rowData[i].values
+      
+      const mapKey = rowDataValues[0].effectiveValue.stringValue
+      let mapValue
+      try { mapValue = JSON.parse(rowDataValues[1].effectiveValue.stringValue) } catch (e) { mapValue = rowDataValues[1].effectiveValue.stringValue }
+
+      super.set(mapKey, mapValue)
+    }
   }
 
   /* get pseudo code : 
@@ -126,12 +142,23 @@ class Cloud extends Map {
 module.exports = Cloud
 
 
-// const options = {
-//   name: 'test',
-//   key: '1GH7uakSPODRQobykuPhnET_YzEZqguHRrFyt4tHyp4s',
-//   saveToken: true,
-// }
 
-// const credentials = fs.readFileSync('./credentials.json')
 
-// const database = new Cloud(options, credentials)
+
+async function main () {
+  const options = {
+    name: 'test',
+    key: '1JH6TWZmaEAR3OUnRVcKZTjCprR1D0xDxtld6XECm47Y',
+    saveToken: true,
+  }
+  
+  const credentials = fs.readFileSync('./credentials.json')
+  
+  const database = new Cloud(options, credentials)
+
+  const spreadsheet = await database.isReady
+
+  console.log(database)
+}
+
+main()

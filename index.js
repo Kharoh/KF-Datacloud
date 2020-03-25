@@ -25,7 +25,6 @@ const _loadDataCloud = Symbol('openDataCloud')
  * 
  * @property {boolean} options.saveToken - Whether a new retrieved token has to be saved or not
  */
-
 class Cloud extends Map {
   constructor(options, credentials, token) {
     super()
@@ -54,14 +53,20 @@ class Cloud extends Map {
     const { client_secret, client_id, redirect_uris } = JSON.parse(credentials).installed
     this[_oAuth2Client] = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0])
 
-    if (this[_token]) this[_oAuth2Client].setCredentials(JSON.parse(token))
+    if (this[_token]) this[_oAuth2Client].setCredentials(JSON.parse(this[_token]))
     else {
-      const newToken = await this[_getAccessToken]()
-      this[_oAuth2Client].setCredentials(newToken)
-      if (this.options.saveToken) this[_saveNewToken]()
+      let newToken
+
+      if (fs.existsSync('./token.json')) newToken = fs.readFileSync('./token.json')
+      else {
+        newToken = await this[_getAccessToken]()
+        if (this.options.saveToken) this[_saveNewToken](newToken)
+      }
+
+      this[_oAuth2Client].setCredentials(JSON.parse(newToken))
     }
 
-    this[_loadDataCloud]
+    this[_loadDataCloud]()
   }
 
   [_getAccessToken] () {
@@ -81,17 +86,16 @@ class Cloud extends Map {
       rl.question('Enter the code from that page here: ', (code) => {
         rl.close()
         this[_oAuth2Client].getToken(code, (err, token) => {
-          if (err) reject('Error retrieving access token', err)
+          if (err) throw new Error('Error retrieving access token', err)
           else resolve(token)
         })
       })
     })
   }
 
-  [_saveNewToken] () {
-    fs.writeFile('./token.json', JSON.stringify(token), (err) => {
+  [_saveNewToken] (newToken) {
+    fs.writeFile('./token.json', JSON.stringify(newToken), (err) => {
       if (err) return console.error(err)
-      console.log('Token stored to ./token.json')
     })
   }
 
@@ -107,48 +111,17 @@ class Cloud extends Map {
     })
   }
 
-
 }
 
+module.exports = Cloud
 
 
-// function createDataCloud(oAuth2Client) {
-//   GoogleSpreadsheets({
-//     key: '1GH7uakSPODRQobykuPhnET_YzEZqguHRrFyt4tHyp4s',
-//     auth: oAuth2Client
-//   }, function(err, spreadsheet) {
-//     console.log(spreadsheet)
-//   })
+// const options = {
+//   name: 'test',
+//   key: '1GH7uakSPODRQobykuPhnET_YzEZqguHRrFyt4tHyp4s',
+//   saveToken: true,
 // }
 
-// fs.readFile(TOKEN_PATH, (err, token) => {
-//   if (err) return getAccessToken(oAuth2Client, createDataCloud)
-//   oAuth2Client.setCredentials(JSON.parse(token))
-//   createDataCloud(oAuth2Client)
-// })
+// const credentials = fs.readFileSync('./credentials.json')
 
-// function getAccessToken(oAuth2Client, callback) {
-//   const authUrl = oAuth2Client.generateAuthUrl({
-//     access_type: 'offline',
-//     scope: SCOPES,
-//   });
-//   console.log('Authorize this app by visiting this url:', authUrl);
-//   const rl = readline.createInterface({
-//     input: process.stdin,
-//     output: process.stdout,
-//   });
-//   rl.question('Enter the code from that page here: ', (code) => {
-//     rl.close();
-//     oAuth2Client.getToken(code, (err, token) => {
-//       if (err) return console.error('Error retrieving access token', err);
-//       oAuth2Client.setCredentials(token);
-//       // Store the token to disk for later program executions
-//       fs.writeFile(TOKEN_PATH, JSON.stringify(token), (err) => {
-//         if (err) return console.error(err);
-//         console.log('Token stored to', TOKEN_PATH);
-//       });
-//       callback(oAuth2Client);
-//     });
-//   });
-// }
-
+// const database = new Cloud(options, credentials)

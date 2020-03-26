@@ -3,21 +3,21 @@ const readline = require('readline')
 const { google } = require('googleapis')
 const _ = require('lodash')
 
-/* We use symbols to create private methods since they are all instatiated during initialization, they will be deleted after it by the garbage collector */
-const _init = Symbol('init')
+/* We use symbols to create a private method */
 const _setCloudReady = Symbol('setCloudReady')
-const _loadDataCloud = Symbol('openDataCloud')
 
 /**
- * We define some methods and variables externally to make them private and to not log them in the console while logging Cloud
- * @private {google.auth.OAuth2} _oAuth2Client - The oAuth2Client used to log and use the spreadsheets
- * 
- * @private {promise} _createOAuth2Client - Function used to create an OAuth2Client when the credentials are given, get called as a private method and can access this
- * @private {function} _getAccessToken - When no token is directly provided in the constructor we call this function to generate a token via a link in the console
- * @private {function} _saveNewToken - 
+ * The google oAuth2Client used to give access to the database
+ * @private
  */
 let _oAuth2Client
 
+/**
+ * Create a google OAuth2Client with the given credentials and a token (or not)
+ * @private
+ * @param {googleAuthCredentials} credentials 
+ * @param {(googleAuthToken|undefined)} token 
+ */
 async function _createOAuth2Client (credentials, token) {
   const { client_secret, client_id, redirect_uris } = JSON.parse(credentials).installed
   _oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0])
@@ -38,6 +38,12 @@ async function _createOAuth2Client (credentials, token) {
   return
 }
 
+/**
+ * Get a new access token by sending a link, callback when there is no token given
+ * @private
+ * @callback
+ * @returns {googleAuthToken}
+ */
 function _getAccessToken () {
   return new Promise((resolve, reject) => {
     const authUrl = _oAuth2Client.generateAuthUrl({
@@ -62,18 +68,42 @@ function _getAccessToken () {
   })
 }
 
+/**
+ * Save the token using fs
+ * @private
+ * @callback
+ * @param {googleAuthToken} newToken 
+ */
 function _saveNewToken (newToken) {
   fs.writeFile('./token.json', JSON.stringify(newToken), (err) => {
     if (err) return console.error(err)
   })
 }
 
+/**
+ * Google sheets api
+ * @private
+ */
 let sheets
 
+/**
+ * The spreadsheet containing the data
+ * @private
+ */
 let _spreadsheet
 
+/**
+ * The Array containing the keys in order, the indices are the rows of the sheet - 2
+ * @private
+ */
 let _keyRowNumbers = []
 
+/**
+ * Set a value on the spreadsheet
+ * @private
+ * @param {(string|number)} key
+ * @param {*} value 
+ */
 async function _spreadsheetSet(key, value) {
   if (typeof value === 'object') value = JSON.stringify(value)
 
@@ -90,6 +120,12 @@ async function _spreadsheetSet(key, value) {
   })
 }
 
+/**
+ * Append a new value on the spreadsheet
+ * @private
+ * @param {(string|number)} key 
+ * @param {*} value 
+ */
 async function _spreadsheetAppend(key, value) {
   if (typeof value === 'object') value = JSON.stringify(value)
 
@@ -108,6 +144,11 @@ async function _spreadsheetAppend(key, value) {
   })
 }
 
+/**
+ * Delete a row on the spreadsheet at the given key
+ * @private
+ * @param {(string|number)} key 
+ */
 async function _spreadsheetDelete(key) {
   console.log(_keyRowNumbers)
   const index = _keyRowNumbers.indexOf(key)
@@ -137,6 +178,10 @@ async function _spreadsheetDelete(key) {
   })
 }
 
+/**
+ * Delete all the values on the spreadsheet
+ * @private
+ */
 async function _spreadsheetDeleteAll() {
   const spreadsheetId = _spreadsheet.data.spreadsheetId
 
@@ -162,12 +207,13 @@ async function _spreadsheetDeleteAll() {
 }
 
 /**
+ * Initialize a new Cloud object to manipulate the spreadsheet and persistently store data
  * @param {string} options.name - The name of the Cloud Database
  * @param {boolean} options.saveToken - Whether a new retrieved token has to be saved or not
  * 
  * @param {google.auth.OAuth2} authInformations.auth - An oAuth2Client already created with the right scopes and the token
- * @param {object} authInformations.credentials - The credentials to needed to log an oAuth2Client if no auth was provided
- * @param {object} authInformations.token - The token needed to access the scope of the sheets, if there is no client specified and the token is not given, it will be automatically asked
+ * @param {googleAuthCredentials} authInformations.credentials - The credentials to needed to log an oAuth2Client if no auth was provided
+ * @param {googleAuthToken} authInformations.token - The token needed to access the scope of the sheets, if there is no client specified and the token is not given, it will be automatically asked
  * 
  * @param {object} credentials - The credentials of a google api app
  * @param {object} token - If there already is, the api token
@@ -194,19 +240,24 @@ class Cloud extends Map {
       this[_setCloudReady] = resolve
     })
 
+    /* Initialize the datacloud using this method, we need to call it since we can't handle async methods in the constructor */
     this[_init](authInformations, options.key)
   }
 
+  /**
+   * Private method called by the constructor to initalize the class
+   * @private
+   * @param {(google.auth.OAuth2|undefined)} param0.auth - The maybe provided OAuth2Client
+   * @param {(googleAuthCredentials|undefined)} param0.credentials - The credentials used to create the OAuth2Client
+   * @param {(googleAuthToken|undefined)} param0.token - The token used to create the OAuth2Client
+   * @param {string} key - The spreadsheetId
+   */
   async [_init] ({ auth, credentials, token }, key) {
     if (auth) _oAuth2Client = auth
     else {
       await _createOAuth2Client.call(this, credentials, token)
     }
 
-    this[_loadDataCloud](key)
-  }
-
-  async [_loadDataCloud] (key) {
     sheets = google.sheets({
       version: 'v4',
       auth: _oAuth2Client
@@ -222,6 +273,9 @@ class Cloud extends Map {
     delete this[_setCloudReady]
   }
 
+  /**
+   * Retrieves all the data from the rows of the spreadsheet and push them in the Map object
+   */
   fetchEverything() {
     const datasheet = _spreadsheet.data.sheets[0] // we could ask the user as a parameter what sheet he wants
 
@@ -239,12 +293,23 @@ class Cloud extends Map {
     }
   }
 
+  /**
+   * Get a value from the Map object given the key and a path if it is an object
+   * @param {(string|number)} key - The key we want retrieve the value from in the Map object
+   * @param {(string|undefined)} path - The path if the value stored is an object
+   */
   get(key, path) {
     const value = super.get(key)
     if (typeof value !== 'object' || !path) return value
     return _.get(value, path)
   }
 
+  /**
+   * Get a value from the Map object given the key and a path if it is an object, if the value is undefined, return the defaultValue
+   * @param {(string|number)} key - The key we want retrieve the value from in the Map object
+   * @param {(string|undefined)} path - The path if the value stored is an object
+   * @param {*} defaultValue - The default value to return if the value is undefined
+   */
   ensure(key, path, defaultValue) {
     if (arguments.length === 2) [key, defaultValue] = arguments
     else if (arguments.length === 3) [key, path, defaultValue] = arguments
@@ -255,6 +320,12 @@ class Cloud extends Map {
     else return _.get(value, path, defaultValue)
   }
 
+  /**
+   * Set a value in the Map object given the key and a path if it is an object
+   * @param {(string|number)} key - The key of the item we want to change in the Map object
+   * @param {(string|undefined)} path - The path if the value stored is an object, giving a path if the value currently stored is not an object will create an object and erase the current value
+   * @param {*} value - The value to set in the Map
+   */
   async set(key, path, value) {
     if (arguments.length === 2) [key, value, path] = arguments
     if (arguments.length === 3) [key, path, value] = arguments
@@ -282,6 +353,11 @@ class Cloud extends Map {
     else await _spreadsheetAppend(key, newValue)
   }
 
+  /**
+   * Delete a value in the Map object given the key and the path if it is an object
+   * @param {(string|number)} key 
+   * @param {(string|undefined)} path 
+   */
   async delete(key, path) {
     const currentValue = super.get(key)
     if (currentValue === undefined) return
@@ -299,6 +375,9 @@ class Cloud extends Map {
     }
   }
 
+  /**
+   * Delete all values from the Map object
+   */
   async deleteAll() {
     super.forEach((value, key) => {
       super.delete(key)
@@ -306,7 +385,6 @@ class Cloud extends Map {
 
     await _spreadsheetDeleteAll()
   }
-
 }
 
 module.exports = Cloud

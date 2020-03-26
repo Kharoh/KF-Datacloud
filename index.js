@@ -68,6 +68,99 @@ function _saveNewToken (newToken) {
   })
 }
 
+let sheets
+
+let _spreadsheet
+
+let _keyRowNumbers = []
+
+async function _spreadsheetSet(key, value) {
+  if (typeof value === 'object') value = JSON.stringify(value)
+
+  const spreadsheetId = _spreadsheet.data.spreadsheetId
+  const range = 'B' + (_keyRowNumbers.indexOf(key) + 2)
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range,
+    valueInputOption: 'USER_ENTERED',
+    resource: {
+      values: [[value]]
+    }
+  })
+}
+
+async function _spreadsheetAppend(key, value) {
+  if (typeof value === 'object') value = JSON.stringify(value)
+
+  _keyRowNumbers.push(key)
+
+  const spreadsheetId = _spreadsheet.data.spreadsheetId
+  const range = 'A' + (_keyRowNumbers.length + 1)
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range,
+    valueInputOption: 'USER_ENTERED',
+    resource: {
+      values: [[key, value]]
+    }
+  })
+}
+
+async function _spreadsheetDelete(key) {
+  console.log(_keyRowNumbers)
+  const index = _keyRowNumbers.indexOf(key)
+
+  _keyRowNumbers.splice(index, 1)
+
+  const spreadsheetId = _spreadsheet.data.spreadsheetId
+
+  console.log(index, _keyRowNumbers)
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    resource: {
+      requests: [
+        {
+          deleteDimension: {
+            range: {
+              sheetId: 0,
+              dimension: 'ROWS',
+              startIndex: index + 1,
+              endIndex: index + 2
+            }
+          }
+        }
+      ]
+    }
+  })
+}
+
+async function _spreadsheetDeleteAll() {
+  const spreadsheetId = _spreadsheet.data.spreadsheetId
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    resource: {
+      requests: [
+        {
+          deleteDimension: {
+            range: {
+              sheetId: 0,
+              dimension: 'ROWS',
+              startIndex: 1,
+              endIndex: _keyRowNumbers.length + 1
+            }
+          }
+        }
+      ]
+    }
+  })
+
+  _keyRowNumbers = []
+}
+
 /**
  * @param {string} options.name - The name of the Cloud Database
  * @param {boolean} options.saveToken - Whether a new retrieved token has to be saved or not
@@ -114,38 +207,41 @@ class Cloud extends Map {
   }
 
   async [_loadDataCloud] (key) {
-    const sheets = google.sheets({
+    sheets = google.sheets({
       version: 'v4',
       auth: _oAuth2Client
     })
 
-    const spreadsheet = await sheets.spreadsheets.get({
+    _spreadsheet = await sheets.spreadsheets.get({
       spreadsheetId: key,
       includeGridData: true,
     })
 
-    this.fetchEverything(spreadsheet)
-    this[_setCloudReady](spreadsheet)
+    this.fetchEverything()
+    this[_setCloudReady](_spreadsheet)
     delete this[_setCloudReady]
   }
 
-  fetchEverything(spreadsheet) {
-    const datasheet = spreadsheet.data.sheets[0] // we could ask the user as a parameter what sheet he wants
+  fetchEverything() {
+    const datasheet = _spreadsheet.data.sheets[0] // we could ask the user as a parameter what sheet he wants
 
-    for (let i = 0; i < datasheet.properties.gridProperties.rowCount; i++) {
-      const rowDataValues = datasheet.data[0].rowData[i].values
+    for (let i = 0; i < datasheet.properties.gridProperties.rowCount - 1; i++) {
+      try {
+        const rowDataValues = datasheet.data[0].rowData[i + 1].values
       
-      const mapKey = rowDataValues[0].effectiveValue.stringValue
-      let mapValue
-      try { mapValue = JSON.parse(rowDataValues[1].effectiveValue.stringValue) } catch (e) { mapValue = rowDataValues[1].effectiveValue.stringValue }
+        const mapKey = rowDataValues[0].formattedValue
+        let mapValue
+        try { mapValue = JSON.parse(rowDataValues[1].formattedValue) } catch (e) { mapValue = rowDataValues[1].formattedValue }
 
-      super.set(mapKey, mapValue)
+        _keyRowNumbers.push(mapKey)
+        super.set(mapKey, mapValue)
+      } catch(e) {}
     }
   }
 
   get(key, path) {
     const value = super.get(key)
-    if (typeof value !== 'object') return value
+    if (typeof value !== 'object' || !path) return value
     return _.get(value, path)
   }
 
@@ -159,31 +255,57 @@ class Cloud extends Map {
     else return _.get(value, path, defaultValue)
   }
 
-  set(key, path, value) {
+  async set(key, path, value) {
     if (arguments.length === 2) [key, value, path] = arguments
     if (arguments.length === 3) [key, path, value] = arguments
 
     if (value === undefined) throw new Error('You should never set undefined value')
 
-    // let currentValue = super.get(key)
-    // let newValue = currentValue === undefined || path ? {} : value
-    // if (typeof newValue === 'object') _.set(newValue, path, value)
+    const currentValue = super.get(key)
 
-    // if (super.get(key) === undefined) // créer une nouvelle row
-    // else 
+    let newValue
+    if (path) {
+      if (_.isPlainObject(currentValue)) {
+        newValue = currentValue
+        _.set(newValue, path, value)
+      } else {
+        newValue = {}
+        _.set(newValue, path, value)
+      }
+    } else {
+      newValue = value
+    }
 
-    // super.set(key, newValue)
+    super.set(key, newValue)
+
+    if (currentValue !== undefined) await _spreadsheetSet(key, newValue)
+    else await _spreadsheetAppend(key, newValue)
   }
 
-  /* get pseudo code : 
-    set (path) {
-      super.set(...)
+  async delete(key, path) {
+    const currentValue = super.get(key)
+    if (currentValue === undefined) return
+    if (path && !_.isPlainObject(currentValue)) throw new Error('You should only specify path when the value stored is an object')
 
-      this[_cloudReady].then(spreadsheet => {
-        spreadsheet.addRow(...)
-      })  
+    if (path) {
+      _.unset(currentValue, path)
+      await this.set(key, currentValue)
     }
-  */
+
+    /* if there is no path, we want to delete the whole row */
+    else {
+      super.delete(key)
+      await _spreadsheetDelete(key)
+    }
+  }
+
+  async deleteAll() {
+    super.forEach((value, key) => {
+      super.delete(key)
+    })
+
+    await _spreadsheetDeleteAll()
+  }
 
 }
 
@@ -202,7 +324,9 @@ async function main () {
 
   await database.isReady
 
-  
+  await database.set('689800000624001043', 'username', 'Nathan')
+  await database.set('567437206579314730', 'Lucas K')
+
 }
   
 main()

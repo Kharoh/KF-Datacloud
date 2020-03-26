@@ -3,7 +3,8 @@ const readline = require('readline')
 const { google } = require('googleapis')
 const _ = require('lodash')
 
-/* We use symbols to create a private method */
+/* We use symbols to create private methods since they are all instatiated during initialization, they will be deleted after it by the garbage collector */
+const _init = Symbol('init')
 const _setCloudReady = Symbol('setCloudReady')
 
 /**

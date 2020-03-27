@@ -389,24 +389,3 @@ class Cloud extends Map {
 }
 
 module.exports = Cloud
-
-async function main () {
-  const options = {
-    name: 'test',
-    key: '1JH6TWZmaEAR3OUnRVcKZTjCprR1D0xDxtld6XECm47Y',
-    saveToken: true,
-  }
-  
-  const credentials = fs.readFileSync('./credentials.json')
-  
-  const database = new Cloud(options, { credentials })
-
-  await database.isReady
-
-  await database.set('689800000624001043', 'username', 'Nathan')
-  await database.set('567437206579314730', 'Lucas K')
-
-}
-  
-main()
-
